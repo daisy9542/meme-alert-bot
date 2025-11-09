@@ -1,6 +1,6 @@
 import { STRATEGY } from "../config.js";
 import { getOneMinuteBuys } from "../metrics/volume.js";
-import { getVolumeMultiplier } from "../metrics/velocity.ts";
+import { getVolumeMultiplier } from "../metrics/velocity.js";
 import { computeFdvNow, fdvHistory } from "../metrics/fdv.js";
 
 /**

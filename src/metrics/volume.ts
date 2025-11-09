@@ -59,12 +59,16 @@ export async function onV2SwapToWindows(params: {
     deltaTarget
   );
   const targetAddr = target === "token0" ? token0 : token1;
+  const fallbackPrice = await fetchTokenUsdViaDexScreener(chain, targetAddr);
   const priceUsd =
     usdByBase ??
-    (await fetchTokenUsdViaDexScreener(chain, targetAddr))?.valueOf() *
-      deltaTarget;
+    (fallbackPrice !== undefined ? fallbackPrice * deltaTarget : undefined);
 
-  if (priceUsd && Number.isFinite(priceUsd) && priceUsd > 0) {
+  if (
+    typeof priceUsd === "number" &&
+    Number.isFinite(priceUsd) &&
+    priceUsd > 0
+  ) {
     windows.recordTrade({
       chain,
       type: "v2",
@@ -117,12 +121,16 @@ export async function onV3SwapToWindows(params: {
     deltaTarget
   );
   const targetAddr = target === "token0" ? token0 : token1;
+  const fallbackPrice = await fetchTokenUsdViaDexScreener(chain, targetAddr);
   const priceUsd =
     usdByBase ??
-    (await fetchTokenUsdViaDexScreener(chain, targetAddr))?.valueOf() *
-      deltaTarget;
+    (fallbackPrice !== undefined ? fallbackPrice * deltaTarget : undefined);
 
-  if (priceUsd && Number.isFinite(priceUsd) && priceUsd > 0) {
+  if (
+    typeof priceUsd === "number" &&
+    Number.isFinite(priceUsd) &&
+    priceUsd > 0
+  ) {
     windows.recordTrade({
       chain,
       type: "v3",
