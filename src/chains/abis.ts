@@ -16,6 +16,7 @@ export const ABI = {
 
   v3Factory: [
     "event PoolCreated(address token0, address token1, uint24 fee, int24 tickSpacing, address pool)",
+    "function getPool(address tokenA, address tokenB, uint24 fee) view returns (address pool)",
   ],
 
   // ---- V2 Pair ----
@@ -58,5 +59,10 @@ export const ABI = {
   uniV2RouterLike: [
     "function getAmountsOut(uint256 amountIn, address[] calldata path) view returns (uint256[] memory amounts)",
     "function getAmountsIn(uint256 amountOut, address[] calldata path) view returns (uint256[] memory amounts)",
+  ],
+
+  // ---- Uniswap V3 / Pancake V3 Quoter ----
+  v3Quoter: [
+    "function quoteExactInputSingle(address tokenIn, address tokenOut, uint24 fee, uint256 amountIn, uint160 sqrtPriceLimitX96) external returns (uint256 amountOut)",
   ],
 } as const;

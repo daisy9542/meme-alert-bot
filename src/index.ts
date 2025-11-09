@@ -9,7 +9,7 @@ import { watchlist, marketKey } from "./state/watchlist.js";
 import { prefetchBaseQuotes, isBaseToken } from "./price/baseQuotes.js";
 import { getTokenDecimals } from "./price/reservesPrice.js";
 import { hasMinLiquidityV2, hasMinLiquidityV3 } from "./safety/minLiquidity.js";
-import { checkSellabilityV2 } from "./safety/sellability.js";
+import { checkSellabilityV2, checkSellabilityV3 } from "./safety/sellability.js";
 import {
   lpRiskScore,
   estimateMintUsdV2,
@@ -222,7 +222,7 @@ async function main() {
       }
     },
 
-    onNewV3Pool: async ({ chain, pool, token0, token1 }) => {
+    onNewV3Pool: async ({ chain, pool, token0, token1, fee }) => {
       const key = marketKey(chain as ChainLabel, "v3", pool);
       if (!watchlist.has(key)) {
         watchlist.enqueueNew({
@@ -231,12 +231,21 @@ async function main() {
           address: pool,
           token0,
           token1,
+          fee,
         });
         logger.info(
           { chain, pool, token0, token1 },
           "🆕 New V3 Pool (pending gates)"
         );
-        runGates(clients, chain as ChainLabel, "v3", pool, token0, token1).catch(
+        runGates(
+          clients,
+          chain as ChainLabel,
+          "v3",
+          pool,
+          token0,
+          token1,
+          fee
+        ).catch(
           () => {}
         );
       }
@@ -318,7 +327,8 @@ async function runGates(
   type: "v2" | "v3",
   addr: `0x${string}`,
   token0: `0x${string}`,
-  token1: `0x${string}`
+  token1: `0x${string}`,
+  fee?: number
 ) {
   const client = chain === "BSC" ? clients.bsc : clients.ethereum;
   const key = marketKey(chain, type, addr);
@@ -345,11 +355,27 @@ async function runGates(
       return;
     }
 
-    // 可卖性（仅 V2 做静态校验）
+    // 可卖性（V2 / V3）
     if (type === "v2") {
       const sell = await checkSellabilityV2(chain, client, token0);
       if (!sell.ok) {
         watchlist.reject(key, `sellability fail: ${sell.note}`);
+        return;
+      }
+    } else {
+      const sell = await checkSellabilityV3({
+        chain,
+        client,
+        token0,
+        token1,
+        pool: addr,
+        fee,
+      });
+      if (!sell.ok) {
+        watchlist.reject(
+          key,
+          `sellability v3 fail: ${sell.note ?? "no quote"}`
+        );
         return;
       }
     }
