@@ -24,6 +24,7 @@ export async function evaluateAlerts(params: {
   lastTradeIsBuy?: boolean;
   lastTradeBuyerUsd?: number; // 单笔买入的 USD（用来判断鲸鱼）
   lastMintUsd?: number; // 最近一次大额加池（权重加分）
+  liquidityUsd?: number; // 当前可见 LP
 }) {
   const { chain, type, addr, client, token0, token1, target } = params;
 
@@ -55,9 +56,19 @@ export async function evaluateAlerts(params: {
   const hitVel =
     vel.ratio === Infinity || vel.ratio >= STRATEGY.VOLUME_MULTIPLIER;
   const hitFdv = fdvRatio !== undefined && fdvRatio >= STRATEGY.FDV_MULTIPLIER;
+  const whaleRatio =
+    params.lastTradeIsBuy &&
+    params.lastTradeUsd !== undefined &&
+    params.liquidityUsd !== undefined &&
+    params.liquidityUsd > 0
+      ? params.lastTradeUsd / params.liquidityUsd
+      : undefined;
+
   const hitWhale = !!(
     params.lastTradeIsBuy &&
-    (params.lastTradeBuyerUsd ?? 0) >= STRATEGY.WHALE_SINGLE_BUY_USD
+    ((whaleRatio !== undefined &&
+      whaleRatio >= STRATEGY.WHALE_LIQUIDITY_RATIO) ||
+      (params.lastTradeBuyerUsd ?? 0) >= STRATEGY.WHALE_SINGLE_BUY_USD)
   );
 
   // 综合评分（简单线性加权；大额加池加分）
@@ -86,7 +97,21 @@ export async function evaluateAlerts(params: {
       `FDV: ${(fdvNow / 1e6).toFixed(2)}M, +${fdvRatio.toFixed(2)}×/3m`
     );
   }
-  if (hitWhale) lines.push(`whale buy >= $${STRATEGY.WHALE_SINGLE_BUY_USD}`);
+  if (hitWhale) {
+    if (whaleRatio !== undefined && !Number.isFinite(whaleRatio)) {
+      lines.push(`whale buy (ratio unavailable)`);
+    } else if (whaleRatio !== undefined) {
+      const tradeText =
+        params.lastTradeUsd !== undefined
+          ? `$${params.lastTradeUsd.toFixed(0)}`
+          : "trade";
+      lines.push(
+        `whale buy: ${(whaleRatio * 100).toFixed(2)}% of liquidity (${tradeText})`
+      );
+    } else {
+      lines.push(`whale buy >= $${STRATEGY.WHALE_SINGLE_BUY_USD}`);
+    }
+  }
 
   return {
     level,

@@ -20,6 +20,7 @@ export interface WatchEntry {
   meta: {
     lastMintUsd?: number; // 最近一次加池美元值（给权重加分）
     baseTokenHint?: `0x${string}`; // 识别哪个是主流基准币（价格换算用的“报价资产”）
+    liquidityUsd?: number; // 激活时可见的 LP 美元
   };
 }
 

@@ -7,6 +7,7 @@ import {
 import { logger } from "./logger.js";
 import { watchlist, marketKey } from "./state/watchlist.js";
 import { prefetchBaseQuotes, isBaseToken } from "./price/baseQuotes.js";
+import { getTokenDecimals } from "./price/reservesPrice.js";
 import { hasMinLiquidityV2, hasMinLiquidityV3 } from "./safety/minLiquidity.js";
 import { checkSellabilityV2 } from "./safety/sellability.js";
 import {
@@ -88,7 +89,7 @@ async function main() {
               : "token0";
 
             // —— 写入滑窗（折 USD）——
-            await onV2SwapToWindows({
+            const swapResult = await onV2SwapToWindows({
               chain: chain as ChainLabel,
               client,
               addr: pair,
@@ -110,11 +111,21 @@ async function main() {
                 : isBaseToken(chain as ChainLabel, token0);
 
             if (otherIsBase) {
+              let cachedDecimals: [number, number] | null = null;
+              const ensureDecimals = async () => {
+                if (cachedDecimals) return cachedDecimals;
+                cachedDecimals = await Promise.all([
+                  getTokenDecimals(client, token0),
+                  getTokenDecimals(client, token1),
+                ]);
+                return cachedDecimals;
+              };
+              const [dec0, dec1] = await ensureDecimals();
+              const decimals = { token0: dec0, token1: dec1 };
+
               // V2 约定：买入 token0 则 amount0Out>0；卖出 token0 则 amount0In>0（token1 同理）
               if (target === "token0") {
-                const tokenIn = Number(args.amount0In); // 卖 token0
-                const baseOut = Number(args.amount1Out); // 得到基准币
-                if (tokenIn > 0 && baseOut > 0) {
+                if (args.amount0In > 0n && args.amount1Out > 0n) {
                   await recordTaxApprox({
                     chain: chain as ChainLabel,
                     type: "v2",
@@ -123,13 +134,12 @@ async function main() {
                     token0,
                     token1,
                     direction: "sellToken0",
-                    tokenIn: tokenIn,
-                    baseOut: baseOut,
+                    tokenIn: args.amount0In,
+                    baseOut: args.amount1Out,
+                    decimals,
                   });
                 }
-                const baseIn = Number(args.amount1In); // 用基准币买 token0
-                const tokenOut = Number(args.amount0Out);
-                if (baseIn > 0 && tokenOut > 0) {
+                if (args.amount1In > 0n && args.amount0Out > 0n) {
                   await recordTaxApprox({
                     chain: chain as ChainLabel,
                     type: "v2",
@@ -138,14 +148,13 @@ async function main() {
                     token0,
                     token1,
                     direction: "buyToken0",
-                    baseIn: baseIn,
-                    tokenIn: tokenOut,
+                    baseIn: args.amount1In,
+                    tokenIn: args.amount0Out,
+                    decimals,
                   });
                 }
               } else {
-                const tokenIn = Number(args.amount1In);
-                const baseOut = Number(args.amount0Out);
-                if (tokenIn > 0 && baseOut > 0) {
+                if (args.amount1In > 0n && args.amount0Out > 0n) {
                   await recordTaxApprox({
                     chain: chain as ChainLabel,
                     type: "v2",
@@ -154,13 +163,12 @@ async function main() {
                     token0,
                     token1,
                     direction: "sellToken1",
-                    tokenIn: tokenIn,
-                    baseOut: baseOut,
+                    tokenIn: args.amount1In,
+                    baseOut: args.amount0Out,
+                    decimals,
                   });
                 }
-                const baseIn = Number(args.amount0In);
-                const tokenOut = Number(args.amount1Out);
-                if (baseIn > 0 && tokenOut > 0) {
+                if (args.amount0In > 0n && args.amount1Out > 0n) {
                   await recordTaxApprox({
                     chain: chain as ChainLabel,
                     type: "v2",
@@ -169,20 +177,15 @@ async function main() {
                     token0,
                     token1,
                     direction: "buyToken1",
-                    baseIn: baseIn,
-                    tokenIn: tokenOut,
+                    baseIn: args.amount0In,
+                    tokenIn: args.amount1Out,
+                    decimals,
                   });
                 }
               }
             }
 
             // —— 告警评估 ——（简单以本笔买入金额判断鲸鱼：>阈值）
-            const lastTradeBuyerUsd =
-              Number(args.amount0Out) > 0 &&
-              isBaseToken(chain as ChainLabel, token1)
-                ? undefined // 若对侧为基准，前面折USD时已计入窗口；此处只需是否达阈值
-                : undefined; // MVP：这里不重复折USD，按窗口+阈值触发
-
             const res = await evaluateAlerts({
               chain: chain as ChainLabel,
               type: "v2",
@@ -191,11 +194,11 @@ async function main() {
               token0,
               token1,
               target,
-              lastTradeIsBuy:
-                target === "token0"
-                  ? Number(args.amount0Out) > 0
-                  : Number(args.amount1Out) > 0,
-              lastTradeBuyerUsd,
+              lastTradeUsd: swapResult?.usd,
+              lastTradeIsBuy: swapResult?.isBuy ?? false,
+              lastTradeBuyerUsd:
+                swapResult && swapResult.isBuy ? swapResult.usd : undefined,
+              liquidityUsd: entry.meta.liquidityUsd,
               lastMintUsd: entry.meta.lastMintUsd,
             });
 
@@ -254,7 +257,7 @@ async function main() {
               ? "token1"
               : "token0";
 
-            await onV3SwapToWindows({
+            const swapResult = await onV3SwapToWindows({
               chain: chain as ChainLabel,
               client,
               addr: pool,
@@ -277,10 +280,11 @@ async function main() {
               token0,
               token1,
               target,
-              lastTradeIsBuy:
-                target === "token0"
-                  ? Number(args.amount0) < 0
-                  : Number(args.amount1) < 0, // V3出池为买入
+              lastTradeUsd: swapResult?.usd,
+              lastTradeIsBuy: swapResult?.isBuy ?? false,
+              lastTradeBuyerUsd:
+                swapResult && swapResult.isBuy ? swapResult.usd : undefined,
+              liquidityUsd: entry.meta.liquidityUsd,
               lastMintUsd: entry.meta.lastMintUsd,
             });
             if (res.level !== "none") {
@@ -364,7 +368,7 @@ async function runGates(
     }
 
     // 全部通过 → 激活
-    watchlist.activate(key);
+    watchlist.activate(key, { liquidityUsd: liq.usd });
     logger.info({ key, addr }, "✅ Safety gates passed — activated");
     await tgSend(
       `✅ *Activated* ${chain} ${type.toUpperCase()} \`${addr}\`\n${notes.join(

@@ -5,6 +5,7 @@
 - 通过“安全闸门”筛选（可卖性、税率、LP 风险、最小流动性）
 - 对通过闸门的池订阅 `Swap/Mint`，做滑动窗口统计
 - 计算三大指标：**1 分钟买入额/笔数**、**量能倍增**、**FDV 增幅**
+- 鲸鱼判定：默认将单笔买入额 ≥ 当前可见 LP 的 **3%** 视为鲸鱼
 - 触发**普通/强烈**预警（默认：控制台输出；可替换为 Telegram/Discord）
 
 > 当前版本语言：TypeScript（ESM），运行器：`tsx`，链库：`viem`。
@@ -72,6 +73,7 @@ BUY_TXS_1M=8
 VOLUME_MULTIPLIER=5
 FDV_MULTIPLIER=3
 WHALE_SINGLE_BUY_USD=5000
+WHALE_LIQUIDITY_RATIO=0.03
 ```
 
 ### 3) 本地运行（开发模式）

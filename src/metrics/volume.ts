@@ -24,7 +24,7 @@ export async function onV2SwapToWindows(params: {
   amount1In: bigint;
   amount0Out: bigint;
   amount1Out: bigint;
-}) {
+}): Promise<{ usd: number; isBuy: boolean } | undefined> {
   const { chain, client, addr, token0, token1, target } = params;
 
   // 归一化数量（自然量）
@@ -77,7 +77,9 @@ export async function onV2SwapToWindows(params: {
       isBuy,
       buyer,
     });
+    return { usd: priceUsd, isBuy };
   }
+  return undefined;
 }
 
 export async function onV3SwapToWindows(params: {
@@ -91,7 +93,7 @@ export async function onV3SwapToWindows(params: {
   recipient: `0x${string}`;
   amount0: bigint; // 注意：V3 为有符号，>0 表示进池，<0 表示出池
   amount1: bigint;
-}) {
+}): Promise<{ usd: number; isBuy: boolean } | undefined> {
   const { chain, client, addr, token0, token1, target } = params;
   const [d0, d1] = await Promise.all([
     getTokenDecimals(client, token0),
@@ -139,7 +141,9 @@ export async function onV3SwapToWindows(params: {
       isBuy,
       buyer,
     });
+    return { usd: priceUsd, isBuy };
   }
+  return undefined;
 }
 
 /** 读取 1 分钟买入额/笔数/独立买家 */

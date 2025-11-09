@@ -1,4 +1,4 @@
-import { PublicClient } from "viem";
+import { PublicClient, formatUnits } from "viem";
 import {
   getV2RelativePrice,
   getV3RelativePrice,
@@ -56,9 +56,13 @@ export async function recordTaxApprox(params: {
   token0: `0x${string}`;
   token1: `0x${string}`;
   direction: "sellToken0" | "sellToken1" | "buyToken0" | "buyToken1";
-  tokenIn?: number;
-  baseOut?: number;
-  baseIn?: number;
+  tokenIn?: bigint;
+  baseOut?: bigint;
+  baseIn?: bigint;
+  decimals: {
+    token0: number;
+    token1: number;
+  };
 }) {
   const { chain, type, addr, client, token0, token1, direction } = params;
   const k = key(chain, type, addr);
@@ -70,16 +74,25 @@ export async function recordTaxApprox(params: {
       : await getV3RelativePrice(client, addr as any, token0, token1);
   if (!rel) return;
 
+  const toUnits = (value: bigint | undefined, decimals: number) => {
+    if (value === undefined) return undefined;
+    const num = Number(formatUnits(value, decimals));
+    return Number.isFinite(num) ? num : undefined;
+  };
+
   const now = Date.now();
   if (
     direction === "sellToken0" &&
     params.tokenIn !== undefined &&
     params.baseOut !== undefined
   ) {
+    const tokenIn = toUnits(params.tokenIn, params.decimals.token0);
+    const baseOut = toUnits(params.baseOut, params.decimals.token1);
+    if (tokenIn === undefined || baseOut === undefined) return;
     // price(base per token0) = p1in0  (若 token1 是基准币)
     const mid = rel.p1in0;
-    const expected = params.tokenIn * mid;
-    const obs = params.baseOut;
+    const expected = tokenIn * mid;
+    const obs = baseOut;
     const tax = Math.max(0, Math.min(1, 1 - obs / Math.max(expected, 1e-12)));
     pushSample(k, { ts: now, sellTax: tax });
   }
@@ -88,9 +101,12 @@ export async function recordTaxApprox(params: {
     params.tokenIn !== undefined &&
     params.baseOut !== undefined
   ) {
+    const tokenIn = toUnits(params.tokenIn, params.decimals.token1);
+    const baseOut = toUnits(params.baseOut, params.decimals.token0);
+    if (tokenIn === undefined || baseOut === undefined) return;
     const mid = rel.p0in1;
-    const expected = params.tokenIn * mid;
-    const obs = params.baseOut;
+    const expected = tokenIn * mid;
+    const obs = baseOut;
     const tax = Math.max(0, Math.min(1, 1 - obs / Math.max(expected, 1e-12)));
     pushSample(k, { ts: now, sellTax: tax });
   }
@@ -99,9 +115,12 @@ export async function recordTaxApprox(params: {
     params.baseIn !== undefined &&
     params.tokenIn !== undefined
   ) {
+    const baseIn = toUnits(params.baseIn, params.decimals.token1);
+    const tokenOut = toUnits(params.tokenIn, params.decimals.token0);
+    if (baseIn === undefined || tokenOut === undefined) return;
     const mid = 1 / rel.p1in0; // token0 per base
-    const expected = params.baseIn * mid;
-    const obs = params.tokenIn;
+    const expected = baseIn * mid;
+    const obs = tokenOut;
     const tax = Math.max(0, Math.min(1, 1 - obs / Math.max(expected, 1e-12)));
     pushSample(k, { ts: now, buyTax: tax });
   }
@@ -110,9 +129,12 @@ export async function recordTaxApprox(params: {
     params.baseIn !== undefined &&
     params.tokenIn !== undefined
   ) {
+    const baseIn = toUnits(params.baseIn, params.decimals.token0);
+    const tokenOut = toUnits(params.tokenIn, params.decimals.token1);
+    if (baseIn === undefined || tokenOut === undefined) return;
     const mid = 1 / rel.p0in1;
-    const expected = params.baseIn * mid;
-    const obs = params.tokenIn;
+    const expected = baseIn * mid;
+    const obs = tokenOut;
     const tax = Math.max(0, Math.min(1, 1 - obs / Math.max(expected, 1e-12)));
     pushSample(k, { ts: now, buyTax: tax });
   }
