@@ -1,4 +1,4 @@
-import { createEvmClients } from "./chains/evmClient.js";
+import { createEvmClients, type EvmClients } from "./chains/evmClient.js";
 import {
   watchFactories,
   watchV2Pair,
@@ -50,7 +50,7 @@ async function main() {
           "🆕 New V2 Pair (pending gates)"
         );
         // 安全闸门（异步跑，不阻塞订阅）
-        runGates(chain as ChainLabel, "v2", pair, token0, token1).catch(
+        runGates(clients, chain as ChainLabel, "v2", pair, token0, token1).catch(
           () => {}
         );
       }
@@ -233,7 +233,7 @@ async function main() {
           { chain, pool, token0, token1 },
           "🆕 New V3 Pool (pending gates)"
         );
-        runGates(chain as ChainLabel, "v3", pool, token0, token1).catch(
+        runGates(clients, chain as ChainLabel, "v3", pool, token0, token1).catch(
           () => {}
         );
       }
@@ -309,13 +309,13 @@ async function main() {
 
 /** 跑安全闸门，通过后激活 watchlist 条目 */
 async function runGates(
+  clients: EvmClients,
   chain: ChainLabel,
   type: "v2" | "v3",
   addr: `0x${string}`,
   token0: `0x${string}`,
   token1: `0x${string}`
 ) {
-  const clients = createEvmClients(); // 若已在上层可传入，这里演示简单获取
   const client = chain === "BSC" ? clients.bsc : clients.ethereum;
   const key = marketKey(chain, type, addr);
 
