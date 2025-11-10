@@ -1,6 +1,7 @@
 import { PublicClient, getContract, parseAbiItem } from "viem";
 import { ABI } from "../chains/abis.js";
 import { getBaseTokenUsd, isBaseToken } from "./baseQuotes.js";
+import { logger } from "../logger.js";
 
 /**
  * 工具：读取 ERC20 decimals（带本地缓存）
@@ -13,10 +14,24 @@ export async function getTokenDecimals(
   const k = `${client.chain?.id}:${addr.toLowerCase()}`;
   const hit = decimalsCache.get(k);
   if (hit !== undefined) return hit;
-  const c = getContract({ address: addr, abi: ABI.erc20, client });
-  const d = Number(await c.read.decimals());
-  decimalsCache.set(k, d);
-  return d;
+  try {
+    const d = Number(
+      await client.readContract({
+        address: addr,
+        abi: ABI.erc20,
+        functionName: "decimals",
+      })
+    );
+    if (Number.isFinite(d)) {
+      decimalsCache.set(k, d);
+      return d;
+    }
+  } catch (e) {
+    logger.warn({ addr, err: String(e) }, "decimals lookup failed, fallback 18");
+  }
+  const fallback = 18;
+  decimalsCache.set(k, fallback);
+  return fallback;
 }
 
 /**
