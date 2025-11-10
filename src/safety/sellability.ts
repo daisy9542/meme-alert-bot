@@ -1,9 +1,9 @@
-import axios from "axios";
 import { getContract, PublicClient } from "viem";
 import { ABI } from "../chains/abis.js";
 import { CHAINS } from "../config.js";
 import { getTokenDecimals } from "../price/reservesPrice.js";
 import { getBaseTokenUsd, isBaseToken } from "../price/baseQuotes.js";
+import { fetchPairData } from "../datasources/dexScreener.js";
 
 /** ---- 常用路由 / Factory / Quoter 地址 ---- */
 const Routers = {
@@ -66,9 +66,7 @@ function pickBase(chain: "BSC" | "ETH"): `0x${string}` {
 /** ---- DexScreener 旁证：最近是否有卖单（弱信号）---- */
 async function hasRecentSells(chain: "BSC" | "ETH", pool: `0x${string}`) {
   try {
-    const slug = chain === "BSC" ? "bsc" : "ethereum";
-    const url = `https://api.dexscreener.com/latest/dex/pairs/${slug}/${pool}`;
-    const { data } = await axios.get(url, { timeout: 6000 });
+    const data = await fetchPairData(chain, pool);
     const txns = data?.pair?.txns;
     const sellsM5 = Number(txns?.m5?.sells ?? 0);
     const sellsH1 = Number(txns?.h1?.sells ?? 0);

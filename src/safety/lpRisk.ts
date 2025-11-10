@@ -1,4 +1,3 @@
-import axios from "axios";
 import { getContract, PublicClient } from "viem";
 import { ABI } from "../chains/abis.js";
 import {
@@ -7,6 +6,7 @@ import {
 } from "../price/reservesPrice.js";
 import { getBaseTokenUsd, isBaseToken } from "../price/baseQuotes.js";
 import { watchlist } from "../state/watchlist.js";
+import { fetchPairData } from "../datasources/dexScreener.js";
 
 /**
  * LP 风险评估（MVP）：
@@ -75,10 +75,7 @@ export async function estimateMintUsdV2(params: {
     }
 
     // 兜底：DexScreener pair 查询 liquidity.usd（可能不是“本次”）
-    const url = `https://api.dexscreener.com/latest/dex/pairs/${
-      chain === "BSC" ? "bsc" : "ethereum"
-    }/${pair}`;
-    const { data } = await axios.get(url, { timeout: 6000 });
+    const data = await fetchPairData(chain, pair);
     const liq = Number(data?.pair?.liquidity?.usd ?? 0);
     return Number.isFinite(liq) && liq > 0 ? liq : undefined;
   } catch {
@@ -118,10 +115,7 @@ export async function lpRiskScore(params: {
 
   // 侧信道：总体 LP 美元（非严格，作为趋势参考）
   try {
-    const url = `https://api.dexscreener.com/latest/dex/pairs/${
-      params.chain === "BSC" ? "bsc" : "ethereum"
-    }/${params.addr}`;
-    const { data } = await axios.get(url, { timeout: 6000 });
+    const data = await fetchPairData(params.chain, params.addr);
     const liq = Number(data?.pair?.liquidity?.usd ?? 0);
     if (Number.isFinite(liq) && liq > 0) {
       if (liq < 3000) {

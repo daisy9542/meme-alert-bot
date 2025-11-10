@@ -1,8 +1,8 @@
-import axios from "axios";
 import { PublicClient, getContract } from "viem";
 import { ABI } from "../chains/abis.js";
 import { getBaseTokenUsd, isBaseToken } from "../price/baseQuotes.js";
 import { STRATEGY } from "../config.js";
+import { fetchPairData } from "../datasources/dexScreener.js";
 
 /**
  * 计算当前池子的“可见美元流动性”并与阈值比较
@@ -62,10 +62,7 @@ export async function hasMinLiquidityV2(params: {
 
   // 兜底：DexScreener
   try {
-    const url = `https://api.dexscreener.com/latest/dex/pairs/${
-      chain === "BSC" ? "bsc" : "ethereum"
-    }/${pair}`;
-    const { data } = await axios.get(url, { timeout: 6000 });
+    const data = await fetchPairData(chain, pair);
     const liq = Number(data?.pair?.liquidity?.usd ?? 0);
     if (Number.isFinite(liq) && liq > 0) {
       return { ok: liq >= min, usd: liq, note: "dexscreener liquidity" };
@@ -84,10 +81,7 @@ export async function hasMinLiquidityV3(params: {
   const { chain, pool } = params;
   const min = params.minUsd ?? STRATEGY.MIN_LIQ_USD;
   try {
-    const url = `https://api.dexscreener.com/latest/dex/pairs/${
-      chain === "BSC" ? "bsc" : "ethereum"
-    }/${pool}`;
-    const { data } = await axios.get(url, { timeout: 6000 });
+    const data = await fetchPairData(chain, pool);
     const liq = Number(data?.pair?.liquidity?.usd ?? 0);
     if (Number.isFinite(liq) && liq > 0) {
       return { ok: liq >= min, usd: liq, note: "dexscreener liquidity (v3)" };

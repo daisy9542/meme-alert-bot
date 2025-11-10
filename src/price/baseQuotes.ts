@@ -1,6 +1,6 @@
-import axios from "axios";
 import { TTLStore } from "../state/stores.js";
 import { CHAINS } from "../config.js";
+import { fetchTokenData } from "../datasources/dexScreener.js";
 
 /**
  * 从 DexScreener 获取 token 的 USD 价格（选择流动性最大的交易对）
@@ -23,8 +23,7 @@ export async function fetchTokenUsdViaDexScreener(
   if (cached !== undefined) return cached;
 
   try {
-    const url = `https://api.dexscreener.com/latest/dex/tokens/${tokenAddress}`;
-    const { data } = await axios.get(url, { timeout: 7_000 });
+    const data = await fetchTokenData(chain, tokenAddress);
     const pairs: any[] = data?.pairs ?? [];
     if (!Array.isArray(pairs) || pairs.length === 0) return undefined;
 
