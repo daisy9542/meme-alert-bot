@@ -4,9 +4,10 @@ import {
   hasMinLiquidityV2,
   hasMinLiquidityV3,
 } from "../safety/minLiquidity.js";
-import { checkSellabilityV2 } from "../safety/sellability.js";
+import { checkSellabilityV2, checkSellabilityV3 } from "../safety/sellability.js";
 import { lpRiskScore } from "../safety/lpRisk.js";
 import { getAvgTaxApprox } from "../safety/taxEstimator.js";
+import { isBaseToken } from "../price/baseQuotes.js";
 
 /**
  * 安全闸门聚合：
@@ -22,9 +23,11 @@ export async function passSafetyGates(params: {
   client: PublicClient;
   token0: `0x${string}`;
   token1: `0x${string}`;
+  fee?: number;
 }) {
-  const { chain, type, addr, client, token0, token1 } = params;
+  const { chain, type, addr, client, token0, token1, fee } = params;
   const reasons: string[] = [];
+  const lpNotes: string[] = [];
   let ok = true;
 
   // 1) 最小流动性
@@ -49,11 +52,30 @@ export async function passSafetyGates(params: {
   }
 
   // 2) 可卖性（V2）
-  if (ok && type === "v2") {
-    const sell = await checkSellabilityV2(chain, client, token0); // 粗检：从目标token换到基准；真正目标侧在后续可补充
-    if (!sell.ok) {
-      ok = false;
-      reasons.push(`sellability: ${sell.note ?? "fail"}`);
+  if (ok) {
+    if (type === "v2") {
+      const sellToken =
+        isBaseToken(chain, token0) && !isBaseToken(chain, token1)
+          ? token1
+          : token0;
+      const sell = await checkSellabilityV2(chain, client, sellToken);
+      if (!sell.ok) {
+        ok = false;
+        reasons.push(`sellability: ${sell.note ?? "fail"}`);
+      }
+    } else {
+      const sell = await checkSellabilityV3({
+        chain,
+        client,
+        token0,
+        token1,
+        pool: addr,
+        fee,
+      });
+      if (!sell.ok) {
+        ok = false;
+        reasons.push(`sellability v3: ${sell.note ?? "fail"}`);
+      }
     }
   }
 
@@ -66,6 +88,7 @@ export async function passSafetyGates(params: {
       token0,
       token1,
     });
+    lpNotes.push(...notes);
     reasons.push(`lpRisk: ${notes.join(", ")}`);
     if (score >= 2) {
       ok = false;
@@ -90,6 +113,7 @@ export async function passSafetyGates(params: {
     context: {
       liquidityUsd: liq.usd,
       taxAvg: tax,
+      lpNotes,
     },
   };
 }

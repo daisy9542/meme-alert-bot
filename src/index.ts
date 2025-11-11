@@ -8,13 +8,7 @@ import { logger } from "./logger.js";
 import { watchlist, marketKey } from "./state/watchlist.js";
 import { prefetchBaseQuotes, isBaseToken } from "./price/baseQuotes.js";
 import { getTokenDecimals } from "./price/reservesPrice.js";
-import { hasMinLiquidityV2, hasMinLiquidityV3 } from "./safety/minLiquidity.js";
-import { checkSellabilityV2, checkSellabilityV3 } from "./safety/sellability.js";
-import {
-  lpRiskScore,
-  estimateMintUsdV2,
-  onV2MintRecord,
-} from "./safety/lpRisk.js";
+import { estimateMintUsdV2, onV2MintRecord } from "./safety/lpRisk.js";
 import { recordTaxApprox } from "./safety/taxEstimator.js";
 import { onV2SwapToWindows, onV3SwapToWindows } from "./metrics/volume.js";
 import { passSafetyGates } from "./rules/gates.js";
@@ -39,6 +33,18 @@ async function main() {
 
   // 已订阅的市场，避免重复
   const subscriptions = new Map<string, () => void>();
+
+  const stopSubscription = (subKey: string) => {
+    const stop = subscriptions.get(subKey);
+    if (!stop) return;
+    try {
+      stop();
+    } catch (err) {
+      logger.warn({ subKey, err }, "Failed to stop subscription");
+    } finally {
+      subscriptions.delete(subKey);
+    }
+  };
 
   const normalize = (addr: `0x${string}`): `0x${string}` =>
     addr.toLowerCase() as `0x${string}`;
@@ -70,6 +76,7 @@ async function main() {
     const token0 = normalize(token0Addr);
     const token1 = normalize(token1Addr);
     const key = marketKey(chain, "v2", pair);
+    const subKey = `${chain}:v2:${pair}`;
 
     if (!watchlist.has(key)) {
       watchlist.enqueueNew({
@@ -83,10 +90,18 @@ async function main() {
         { chain, pair, token0, token1, source: meta?.source ?? "factory" },
         "Tracking V2 market (pending gates)"
       );
-      runGates(clients, chain, "v2", pair, token0, token1).catch(() => {});
+      runGates(
+        clients,
+        chain,
+        "v2",
+        pair,
+        token0,
+        token1,
+        undefined,
+        () => stopSubscription(subKey)
+      ).catch(() => stopSubscription(subKey));
     }
 
-    const subKey = `${chain}:v2:${pair}`;
     if (subscriptions.has(subKey)) return;
     if (!hasCapacity()) {
       logger.warn({ chain, pair }, "Active market limit reached, skip V2 subscribe");
@@ -271,6 +286,7 @@ async function main() {
     const token0 = normalize(token0Addr);
     const token1 = normalize(token1Addr);
     const key = marketKey(chain, "v3", pool);
+    const subKey = `${chain}:v3:${pool}`;
 
     if (!watchlist.has(key)) {
       watchlist.enqueueNew({
@@ -285,10 +301,18 @@ async function main() {
         { chain, pool, token0, token1, source: meta?.source ?? "factory" },
         "Tracking V3 market (pending gates)"
       );
-      runGates(clients, chain, "v3", pool, token0, token1, fee).catch(() => {});
+      runGates(
+        clients,
+        chain,
+        "v3",
+        pool,
+        token0,
+        token1,
+        fee,
+        () => stopSubscription(subKey)
+      ).catch(() => stopSubscription(subKey));
     }
 
-    const subKey = `${chain}:v3:${pool}`;
     if (subscriptions.has(subKey)) return;
     if (!hasCapacity()) {
       logger.warn({ chain, pool }, "Active market limit reached, skip V3 subscribe");
@@ -375,6 +399,14 @@ async function main() {
       ensureV3Market(chain, pool, token0, token1, fee, { source: "trending" }),
   });
 
+  setInterval(() => {
+    const removed = watchlist.sweep();
+    if (removed.length) {
+      removed.forEach(stopSubscription);
+      logger.debug({ removed }, "Swept stale watchlist entries");
+    }
+  }, 10 * 60_000);
+
   logger.info("👀 Subscriptions ready — factories & trending feeds online");
 }
 
@@ -386,82 +418,42 @@ async function runGates(
   addr: `0x${string}`,
   token0: `0x${string}`,
   token1: `0x${string}`,
-  fee?: number
+  fee?: number,
+  cancelSubscription?: () => void
 ) {
   const client = chain === "BSC" ? clients.bsc : clients.ethereum;
   const key = marketKey(chain, type, addr);
+  const cancel = cancelSubscription ?? (() => {});
 
   try {
-    // 最小流动性早筛（快速失败）
-    const liq =
-      type === "v2"
-        ? await hasMinLiquidityV2({
-            chain,
-            client,
-            pair: addr as any,
-            token0,
-            token1,
-            minUsd: STRATEGY.MIN_LIQ_USD,
-          })
-        : await hasMinLiquidityV3({
-            chain,
-            pool: addr as any,
-            minUsd: STRATEGY.MIN_LIQ_USD,
-          });
-    if (!liq.ok) {
-      watchlist.reject(key, `minLiquidity fail: ${liq.note ?? ""}`);
-      return;
-    }
-
-    // 可卖性（V2 / V3）
-    if (type === "v2") {
-      const sell = await checkSellabilityV2(chain, client, token0);
-      if (!sell.ok) {
-        watchlist.reject(key, `sellability fail: ${sell.note}`);
-        return;
-      }
-    } else {
-      const sell = await checkSellabilityV3({
-        chain,
-        client,
-        token0,
-        token1,
-        pool: addr,
-        fee,
-      });
-      if (!sell.ok) {
-        watchlist.reject(
-          key,
-          `sellability v3 fail: ${sell.note ?? "no quote"}`
-        );
-        return;
-      }
-    }
-
-    // LP 风险评分
-    const { score, notes } = await lpRiskScore({
+    const gates = await passSafetyGates({
       chain,
       type,
       addr,
+      client,
       token0,
       token1,
+      fee,
     });
-    if (score >= 2) {
-      watchlist.reject(key, `lpRisk high: ${notes.join(",")}`);
+    if (!gates.ok) {
+      watchlist.reject(key, gates.reasons.join("; "));
+      cancel();
       return;
     }
 
-    // 全部通过 → 激活
-    watchlist.activate(key, { liquidityUsd: liq.usd });
+    watchlist.activate(key, { liquidityUsd: gates.context.liquidityUsd });
     logger.info({ key, addr }, "✅ Safety gates passed — activated");
+    const lpNote =
+      gates.context.lpNotes && gates.context.lpNotes.length
+        ? gates.context.lpNotes.join(" | ")
+        : "gates passed";
     await tgSend(
-      `✅ *Activated* ${chain} ${type.toUpperCase()} \`${addr}\`\n${notes.join(
-        " | "
-      )}`
+      `✅ *Activated* ${chain} ${type.toUpperCase()} \`${addr}\`\n${lpNote}`
     );
   } catch (e: any) {
     logger.error({ key, e }, "runGates error");
     watchlist.reject(key, "gates error");
+    cancel();
   }
 }
 

@@ -22,8 +22,11 @@ export interface TradeEvent {
 class SlidingWindow {
   private events: TradeEvent[] = [];
   private buyers1m = new Set<string>(); // 最近1分钟的独立买家（快速查询用）
+  private lastActiveTs = 0;
 
-  constructor(private keepMs = 10 * 60_000) {}
+  constructor(private keepMs = 10 * 60_000) {
+    this.lastActiveTs = Date.now();
+  }
 
   private prune(now = Date.now()) {
     const cutoff = now - this.keepMs;
@@ -34,6 +37,7 @@ class SlidingWindow {
 
   record(ev: TradeEvent) {
     this.events.push(ev);
+    this.lastActiveTs = ev.ts;
     // 轻 prune，避免频繁 O(n)
     if (this.events.length % 128 === 0) this.prune(ev.ts);
   }
@@ -87,12 +91,22 @@ class SlidingWindow {
     const rest = Math.max(0, total10 - total1);
     return rest / 9;
   }
+
+  lastActivityTs() {
+    if (this.events.length) {
+      return this.events[this.events.length - 1].ts;
+    }
+    return this.lastActiveTs;
+  }
 }
 
 /** 多市场窗口管理 */
 class WindowsManager {
   private m = new Map<string, SlidingWindow>();
-  constructor(private keepMs = 10 * 60_000) {}
+  constructor(
+    private keepMs = 10 * 60_000,
+    private idleDropMs = 2 * 60 * 60_000
+  ) {}
 
   key(chain: ChainLabel, type: MarketType, addr: `0x${string}`) {
     return `${chain}:${type}:${addr.toLowerCase()}`;
@@ -125,21 +139,38 @@ class WindowsManager {
       isBuy: params.isBuy,
       buyer: params.buyer,
     });
+    this.pruneIdle();
   }
 
   /** 快捷查询：1 分钟聚合 */
   oneMinute(chain: ChainLabel, type: MarketType, addr: `0x${string}`) {
-    return this.get(chain, type, addr).oneMinute();
+    const w = this.get(chain, type, addr);
+    const res = w.oneMinute();
+    this.pruneIdle();
+    return res;
   }
 
   /** 快捷查询：5–10 分钟基线均值 */
   baselineAvgPerMin(chain: ChainLabel, type: MarketType, addr: `0x${string}`) {
-    return this.get(chain, type, addr).baselineAvgPerMin();
+    const res = this.get(chain, type, addr).baselineAvgPerMin();
+    this.pruneIdle();
+    return res;
   }
 
   /** 最近 10 分钟总额 */
   tenMinutesTotal(chain: ChainLabel, type: MarketType, addr: `0x${string}`) {
-    return this.get(chain, type, addr).tenMinutesTotal();
+    const res = this.get(chain, type, addr).tenMinutesTotal();
+    this.pruneIdle();
+    return res;
+  }
+
+  private pruneIdle(now = Date.now()) {
+    for (const [key, window] of this.m.entries()) {
+      const last = window.lastActivityTs();
+      if (now - last > this.idleDropMs) {
+        this.m.delete(key);
+      }
+    }
   }
 }
 

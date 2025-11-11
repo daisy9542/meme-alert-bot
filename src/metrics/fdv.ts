@@ -16,6 +16,13 @@ import {
 type ChainLabel = "BSC" | "ETH";
 type MarketType = "v2" | "v3";
 
+const FDV_CACHE_TTL_MS = 30_000;
+const fdvCache = new Map<string, { ts: number; value: number }>();
+
+function fdvCacheKey(chain: ChainLabel, token: `0x${string}`) {
+  return `${chain}:${token.toLowerCase()}`;
+}
+
 /** 近历史（最多 15 分钟） */
 class FdvHistory {
   private m = new Map<string, Array<{ ts: number; fdv: number }>>();
@@ -67,6 +74,12 @@ export async function computeFdvNow(params: {
 }): Promise<number | undefined> {
   const { chain, client, type, addr, token0, token1, target } = params;
   const token = target === "token0" ? token0 : token1;
+  const cacheKey = fdvCacheKey(chain, token);
+  const nowTs = Date.now();
+  const cached = fdvCache.get(cacheKey);
+  if (cached && nowTs - cached.ts < FDV_CACHE_TTL_MS) {
+    return cached.value;
+  }
 
   // 1) totalSupply
   const erc = getContract({ address: token, abi: PARSED_ABI.erc20, client });
@@ -90,5 +103,7 @@ export async function computeFdvNow(params: {
   }
   if (priceUsd === undefined || !Number.isFinite(priceUsd)) return undefined;
 
-  return supply * priceUsd;
+  const fdv = supply * priceUsd;
+  fdvCache.set(cacheKey, { ts: nowTs, value: fdv });
+  return fdv;
 }

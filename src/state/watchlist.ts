@@ -36,6 +36,10 @@ export function marketKey(
 /** Watchlist in-memory 实现 */
 class WatchlistStore {
   private store = new KVStore<WatchEntry>();
+  constructor(
+    private activeTtlMs = 24 * 60 * 60_000,
+    private inactiveTtlMs = 60 * 60_000
+  ) {}
 
   enqueueNew(
     params: Omit<
@@ -96,6 +100,19 @@ class WatchlistStore {
       if (!status || v.status === status) out.push(v);
     }
     return out;
+  }
+
+  /** 清理过期条目，返回被移除的 key */
+  sweep(now = Date.now()) {
+    const removed: string[] = [];
+    for (const [key, entry] of this.store.entries()) {
+      const ttl = entry.status === "active" ? this.activeTtlMs : this.inactiveTtlMs;
+      if (now - entry.lastUpdated > ttl) {
+        this.store.delete(key);
+        removed.push(key);
+      }
+    }
+    return removed;
   }
 }
 
