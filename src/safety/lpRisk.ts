@@ -1,5 +1,5 @@
 import { getContract, PublicClient } from "viem";
-import { ABI } from "../chains/abis.js";
+import { PARSED_ABI } from "../chains/abis.js";
 import {
   getV2RelativePrice,
   getV3RelativePrice,
@@ -40,14 +40,14 @@ export async function estimateMintUsdV2(params: {
       const dec0 = Number(
         await getContract({
           address: token0,
-          abi: ABI.erc20,
+          abi: PARSED_ABI.erc20,
           client,
         }).read.decimals()
       );
       const dec1 = Number(
         await getContract({
           address: token1,
-          abi: ABI.erc20,
+          abi: PARSED_ABI.erc20,
           client,
         }).read.decimals()
       );

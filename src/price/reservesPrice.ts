@@ -1,5 +1,5 @@
-import { PublicClient, getContract, parseAbiItem } from "viem";
-import { ABI } from "../chains/abis.js";
+import { PublicClient, getContract } from "viem";
+import { PARSED_ABI } from "../chains/abis.js";
 import { getBaseTokenUsd, isBaseToken } from "./baseQuotes.js";
 import { logger } from "../logger.js";
 
@@ -18,7 +18,7 @@ export async function getTokenDecimals(
     const d = Number(
       await client.readContract({
         address: addr,
-        abi: ABI.erc20,
+        abi: PARSED_ABI.erc20,
         functionName: "decimals",
       })
     );
@@ -44,7 +44,7 @@ export async function getV2RelativePrice(
   token0: `0x${string}`,
   token1: `0x${string}`
 ): Promise<{ p0in1: number; p1in0: number } | undefined> {
-  const c = getContract({ address: pair, abi: ABI.v2Pair, client });
+  const c = getContract({ address: pair, abi: PARSED_ABI.v2Pair, client });
   const [r0, r1] = (await c.read.getReserves()) as unknown as [
     bigint,
     bigint,
@@ -75,7 +75,7 @@ export async function getV3RelativePrice(
   token0: `0x${string}`,
   token1: `0x${string}`
 ): Promise<{ p0in1: number; p1in0: number } | undefined> {
-  const c = getContract({ address: pool, abi: ABI.v3Pool, client });
+  const c = getContract({ address: pool, abi: PARSED_ABI.v3Pool, client });
 
   const [sqrtPriceX96] = (await c.read.slot0()) as unknown as [
     bigint,

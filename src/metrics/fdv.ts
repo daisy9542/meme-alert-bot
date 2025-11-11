@@ -1,5 +1,5 @@
 import { PublicClient, getContract } from "viem";
-import { ABI } from "../chains/abis.js";
+import { PARSED_ABI } from "../chains/abis.js";
 import { fetchTokenUsdViaDexScreener } from "../price/baseQuotes.js";
 import {
   v2PricesUsdIfBase,
@@ -69,7 +69,7 @@ export async function computeFdvNow(params: {
   const token = target === "token0" ? token0 : token1;
 
   // 1) totalSupply
-  const erc = getContract({ address: token, abi: ABI.erc20, client });
+  const erc = getContract({ address: token, abi: PARSED_ABI.erc20, client });
   const [supplyBI, dec] = await Promise.all([
     erc.read.totalSupply() as Promise<bigint>,
     getTokenDecimals(client, token),

@@ -1,5 +1,5 @@
 import { getContract, PublicClient } from "viem";
-import { ABI } from "../chains/abis.js";
+import { PARSED_ABI } from "../chains/abis.js";
 import { CHAINS } from "../config.js";
 import { getTokenDecimals } from "../price/reservesPrice.js";
 import { getBaseTokenUsd, isBaseToken } from "../price/baseQuotes.js";
@@ -110,7 +110,7 @@ export async function checkSellabilityV2(
 
     const router = getContract({
       address: routerAddr,
-      abi: ABI.uniV2RouterLike,
+      abi: PARSED_ABI.uniV2RouterLike,
       client,
     });
 
@@ -241,7 +241,7 @@ export async function checkSellabilityV3(params: {
       try {
         const out = (await client.readContract({
           address: quoterAddr,
-          abi: ABI.v3Quoter,
+          abi: PARSED_ABI.v3Quoter,
           functionName: "quoteExactInputSingle",
           args: [target, baseInPool, fee, amt, 0n],
         })) as bigint;
@@ -304,7 +304,7 @@ async function verifyPool(
     const factory = V3Factories[chain] as `0x${string}`;
     const onChainPool = (await client.readContract({
       address: factory,
-      abi: ABI.v3Factory,
+      abi: PARSED_ABI.v3Factory,
       functionName: "getPool",
       args: [a, b, fee],
     })) as `0x${string}`;

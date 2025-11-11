@@ -1,5 +1,5 @@
 import { PublicClient, getContract } from "viem";
-import { ABI } from "../chains/abis.js";
+import { PARSED_ABI } from "../chains/abis.js";
 import { getBaseTokenUsd, isBaseToken } from "../price/baseQuotes.js";
 import { STRATEGY } from "../config.js";
 import { fetchPairData } from "../datasources/dexScreener.js";
@@ -22,7 +22,7 @@ export async function hasMinLiquidityV2(params: {
   const min = params.minUsd ?? STRATEGY.MIN_LIQ_USD;
 
   try {
-    const c = getContract({ address: pair, abi: ABI.v2Pair, client });
+    const c = getContract({ address: pair, abi: PARSED_ABI.v2Pair, client });
     const [r0, r1] = (await c.read.getReserves()) as unknown as [
       bigint,
       bigint,
@@ -34,7 +34,7 @@ export async function hasMinLiquidityV2(params: {
       const d1 = Number(
         await getContract({
           address: token1,
-          abi: ABI.erc20,
+          abi: PARSED_ABI.erc20,
           client,
         }).read.decimals()
       );
@@ -48,7 +48,7 @@ export async function hasMinLiquidityV2(params: {
       const d0 = Number(
         await getContract({
           address: token0,
-          abi: ABI.erc20,
+          abi: PARSED_ABI.erc20,
           client,
         }).read.decimals()
       );

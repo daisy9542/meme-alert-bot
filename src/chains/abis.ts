@@ -1,10 +1,14 @@
+import { parseAbi } from "viem";
+
 /**
- * 最小 ABI 片段集合：
+ * 最小 ABI 片段集合（字符串形式）：
  * - 工厂事件：V2 PairCreated / V3 PoolCreated
  * - V2 Pair：Swap / Mint / getReserves / token0 / token1
  * - V3 Pool：Swap / slot0 / token0 / token1 / fee
  * - ERC20：decimals / totalSupply / symbol / name
  * - （后续 sellability/tax 可能用到的 Router 选择性补充）
+ *
+ * 字符串 ABI 便于 parseAbiItem，但在合约调用中需要结构化 ABI，见下方 PARSED_ABI。
  */
 
 export const ABI = {
@@ -66,3 +70,13 @@ export const ABI = {
     "function quoteExactInputSingle(address tokenIn, address tokenOut, uint24 fee, uint256 amountIn, uint160 sqrtPriceLimitX96) external returns (uint256 amountOut)",
   ],
 } as const;
+
+/** 针对合约调用的结构化 ABI（parseAbi 结果） */
+export const PARSED_ABI = {
+  v2Pair: parseAbi(ABI.v2Pair),
+  v3Pool: parseAbi(ABI.v3Pool),
+  erc20: parseAbi(ABI.erc20),
+  uniV2RouterLike: parseAbi(ABI.uniV2RouterLike),
+  v3Quoter: parseAbi(ABI.v3Quoter),
+  v3Factory: parseAbi(ABI.v3Factory),
+};
