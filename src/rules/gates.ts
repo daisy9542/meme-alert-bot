@@ -7,6 +7,7 @@ import {
 import { checkSellabilityV2, checkSellabilityV3 } from "../safety/sellability.js";
 import { lpRiskScore } from "../safety/lpRisk.js";
 import { getAvgTaxApprox } from "../safety/taxEstimator.js";
+import { hasOnchainCode } from "../safety/bytecode.js";
 import { isBaseToken } from "../price/baseQuotes.js";
 
 /**
@@ -29,6 +30,35 @@ export async function passSafetyGates(params: {
   const reasons: string[] = [];
   const lpNotes: string[] = [];
   let ok = true;
+
+  // 0) 地址必须有合约代码
+  const [addrHasCode, token0HasCode, token1HasCode] = await Promise.all([
+    hasOnchainCode(client, addr),
+    hasOnchainCode(client, token0),
+    hasOnchainCode(client, token1),
+  ]);
+  if (!addrHasCode) {
+    ok = false;
+    reasons.push("pair/pool 无合约代码");
+  }
+  if (!token0HasCode || !token1HasCode) {
+    ok = false;
+    reasons.push(
+      `token 合约缺失: ${[
+        !token0HasCode ? "token0" : null,
+        !token1HasCode ? "token1" : null,
+      ]
+        .filter(Boolean)
+        .join("/")}`
+    );
+  }
+  if (!ok) {
+    return {
+      ok: false,
+      reasons,
+      context: { liquidityUsd: undefined, taxAvg: {}, lpNotes },
+    };
+  }
 
   // 1) 最小流动性
   const liq =
