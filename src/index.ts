@@ -24,6 +24,11 @@ import { STRATEGY } from "./config.js";
 import { startTrendingWatcher } from "./pipeline/trending.js";
 
 type ChainLabel = "BSC" | "ETH";
+const ADDRESS_REGEX = /^0x[0-9a-fA-F]{40}$/;
+
+const looksLikeAddress = (
+  value: string | undefined
+): value is `0x${string}` => !!value && ADDRESS_REGEX.test(value);
 
 async function main() {
   const clients = createEvmClients();
@@ -50,6 +55,17 @@ async function main() {
     token1Addr: `0x${string}`,
     meta?: { source?: string }
   ) => {
+    if (
+      !looksLikeAddress(pairAddr) ||
+      !looksLikeAddress(token0Addr) ||
+      !looksLikeAddress(token1Addr)
+    ) {
+      logger.warn(
+        { chain, pairAddr, token0Addr, token1Addr, source: meta?.source },
+        "Invalid V2 market address detected, skip"
+      );
+      return;
+    }
     const pair = normalize(pairAddr);
     const token0 = normalize(token0Addr);
     const token1 = normalize(token1Addr);
@@ -240,6 +256,17 @@ async function main() {
     fee?: number,
     meta?: { source?: string }
   ) => {
+    if (
+      !looksLikeAddress(poolAddr) ||
+      !looksLikeAddress(token0Addr) ||
+      !looksLikeAddress(token1Addr)
+    ) {
+      logger.warn(
+        { chain, poolAddr, token0Addr, token1Addr, source: meta?.source },
+        "Invalid V3 market address detected, skip"
+      );
+      return;
+    }
     const pool = normalize(poolAddr);
     const token0 = normalize(token0Addr);
     const token1 = normalize(token1Addr);
