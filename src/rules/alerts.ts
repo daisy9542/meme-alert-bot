@@ -85,31 +85,33 @@ export async function evaluateAlerts(params: {
 
   const lines: string[] = [];
   lines.push(
-    `1m buys: $${vol.buyUsd.toFixed(0)} / ${vol.buyTxs} tx / ${
+    `1 分钟买入：$${vol.buyUsd.toFixed(0)} / ${vol.buyTxs} 笔 / ${
       vol.uniqueBuyers
-    } addrs`
+    } 地址`
   );
   lines.push(
-    `velocity: ${vel.ratio === Infinity ? "∞" : vel.ratio.toFixed(2)}×`
+    `量能倍数：${vel.ratio === Infinity ? "∞" : vel.ratio.toFixed(2)}×`
   );
   if (fdvNow !== undefined && fdvRatio !== undefined) {
     lines.push(
-      `FDV: ${(fdvNow / 1e6).toFixed(2)}M, +${fdvRatio.toFixed(2)}×/3m`
+      `FDV：${(fdvNow / 1e6).toFixed(2)}M，总值提升 ${fdvRatio.toFixed(
+        2
+      )}× / 3 分钟`
     );
   }
   if (hitWhale) {
-    if (whaleRatio !== undefined && !Number.isFinite(whaleRatio)) {
-      lines.push(`whale buy (ratio unavailable)`);
-    } else if (whaleRatio !== undefined) {
+    if (whaleRatio !== undefined && Number.isFinite(whaleRatio)) {
       const tradeText =
         params.lastTradeUsd !== undefined
           ? `$${params.lastTradeUsd.toFixed(0)}`
-          : "trade";
+          : "未知金额";
       lines.push(
-        `whale buy: ${(whaleRatio * 100).toFixed(2)}% of liquidity (${tradeText})`
+        `鲸鱼买入：吞噬 ${(whaleRatio * 100).toFixed(2)}% 流动性（${tradeText}）`
       );
     } else {
-      lines.push(`whale buy >= $${STRATEGY.WHALE_SINGLE_BUY_USD}`);
+      lines.push(
+        `鲸鱼买入：单笔金额 ≥ $${STRATEGY.WHALE_SINGLE_BUY_USD.toFixed(0)}`
+      );
     }
   }
 

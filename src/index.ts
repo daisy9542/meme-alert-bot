@@ -442,13 +442,9 @@ async function runGates(
     }
 
     watchlist.activate(key, { liquidityUsd: gates.context.liquidityUsd });
-    logger.info({ key, addr }, "✅ Safety gates passed — activated");
-    const lpNote =
-      gates.context.lpNotes && gates.context.lpNotes.length
-        ? gates.context.lpNotes.join(" | ")
-        : "gates passed";
-    await tgSend(
-      `✅ *Activated* ${chain} ${type.toUpperCase()} \`${addr}\`\n${lpNote}`
+    logger.info(
+      { key, addr, lpNotes: gates.context.lpNotes },
+      "✅ Safety gates passed — activated"
     );
   } catch (e: any) {
     logger.error({ key, e }, "runGates error");
