@@ -83,7 +83,16 @@ export async function evaluateAlerts(params: {
   if (score >= 6 && (hitWhale || (hitVel && hitFdv))) level = "strong";
   else if (score >= 3) level = "normal";
 
+  const triggerReasons: string[] = [];
+  if (hitBuy) triggerReasons.push("1 分钟买入额/笔数超阈值");
+  if (hitVel) triggerReasons.push("成交量瞬时倍增");
+  if (hitFdv) triggerReasons.push("FDV 3 分钟倍增");
+  if (hitWhale) triggerReasons.push("出现鲸鱼级买单");
+
   const lines: string[] = [];
+  if (triggerReasons.length) {
+    lines.push(`触发因子：${triggerReasons.join("，")}`);
+  }
   lines.push(
     `1 分钟买入：$${vol.buyUsd.toFixed(0)} / ${vol.buyTxs} 笔 / ${
       vol.uniqueBuyers

@@ -65,18 +65,6 @@ function buildQuickLinks(chain: "BSC" | "ETH", addr: `0x${string}`) {
       label: "DexScreener",
       url: `https://dexscreener.com/${DS_SLUG[chain]}/${addr}`,
     },
-    {
-      label: "GMGN",
-      url: `https://gmgn.ai/${GMGN_SLUG[chain]}/pair/${addr}`,
-    },
-    {
-      label: "OKX",
-      url: `https://www.okx.com/web3/dex-swap/${GMGN_SLUG[chain]}/${addr}`,
-    },
-    {
-      label: "BN",
-      url: `https://www.binance.com/en/web3/dex-swap/${GMGN_SLUG[chain]}/${addr}`,
-    },
   ];
 
   return links
