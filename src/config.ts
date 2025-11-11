@@ -17,6 +17,10 @@ const EnvSchema = z.object({
   FDV_MULTIPLIER: z.string().optional(),
   WHALE_SINGLE_BUY_USD: z.string().optional(),
   WHALE_LIQUIDITY_RATIO: z.string().optional(),
+  MAX_ACTIVE_MARKETS: z.string().optional(),
+  TRENDING_POLL_INTERVAL_MS: z.string().optional(),
+  TRENDING_MIN_LIQ_USD: z.string().optional(),
+  TRENDING_TOP_K: z.string().optional(),
 });
 
 const env = EnvSchema.parse(process.env);
@@ -30,6 +34,10 @@ export const STRATEGY = {
   FDV_MULTIPLIER: Number(env.FDV_MULTIPLIER ?? 3),
   WHALE_SINGLE_BUY_USD: Number(env.WHALE_SINGLE_BUY_USD ?? 5000),
   WHALE_LIQUIDITY_RATIO: Number(env.WHALE_LIQUIDITY_RATIO ?? 0.03),
+  MAX_ACTIVE_MARKETS: Number(env.MAX_ACTIVE_MARKETS ?? 600),
+  TRENDING_POLL_INTERVAL_MS: Number(env.TRENDING_POLL_INTERVAL_MS ?? 60_000),
+  TRENDING_MIN_LIQ_USD: Number(env.TRENDING_MIN_LIQ_USD ?? 30_000),
+  TRENDING_TOP_K: Number(env.TRENDING_TOP_K ?? 50),
   MAX_TAX_PCT: 0.2, // 粗估可接受税率上限（20%）
 };
 

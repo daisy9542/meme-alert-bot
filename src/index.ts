@@ -21,6 +21,7 @@ import { passSafetyGates } from "./rules/gates.js";
 import { evaluateAlerts } from "./rules/alerts.js";
 import { tgSend, buildAlertMessage } from "./notifiers/console.js";
 import { STRATEGY } from "./config.js";
+import { startTrendingWatcher } from "./pipeline/trending.js";
 
 type ChainLabel = "BSC" | "ETH";
 
@@ -32,292 +33,322 @@ async function main() {
   prefetchBaseQuotes("ETH").catch(() => {});
 
   // 已订阅的市场，避免重复
-  const subscribed = new Set<string>();
+  const subscriptions = new Map<string, () => void>();
+
+  const normalize = (addr: `0x${string}`): `0x${string}` =>
+    addr.toLowerCase() as `0x${string}`;
+
+  const hasCapacity = () => {
+    if (subscriptions.size < STRATEGY.MAX_ACTIVE_MARKETS) return true;
+    return false;
+  };
+
+  const ensureV2Market = (
+    chain: ChainLabel,
+    pairAddr: `0x${string}`,
+    token0Addr: `0x${string}`,
+    token1Addr: `0x${string}`,
+    meta?: { source?: string }
+  ) => {
+    const pair = normalize(pairAddr);
+    const token0 = normalize(token0Addr);
+    const token1 = normalize(token1Addr);
+    const key = marketKey(chain, "v2", pair);
+
+    if (!watchlist.has(key)) {
+      watchlist.enqueueNew({
+        chain,
+        type: "v2",
+        address: pair,
+        token0,
+        token1,
+      });
+      logger.info(
+        { chain, pair, token0, token1, source: meta?.source ?? "factory" },
+        "Tracking V2 market (pending gates)"
+      );
+      runGates(clients, chain, "v2", pair, token0, token1).catch(() => {});
+    }
+
+    const subKey = `${chain}:v2:${pair}`;
+    if (subscriptions.has(subKey)) return;
+    if (!hasCapacity()) {
+      logger.warn({ chain, pair }, "Active market limit reached, skip V2 subscribe");
+      return;
+    }
+
+    const client = chain === "BSC" ? clients.bsc : clients.ethereum;
+    const stop = watchV2Pair(client, chain, pair, {
+      onV2Mint: async ({ args: { amount0, amount1 } }) => {
+        const usd = await estimateMintUsdV2({
+          chain,
+          client,
+          pair,
+          token0,
+          token1,
+          amount0,
+          amount1,
+        });
+        await onV2MintRecord(key, usd);
+      },
+      onV2Swap: async ({ args, chain: eventChain }) => {
+        const entry = watchlist.get(key);
+        if (!entry || entry.status !== "active") return;
+
+        const target = isBaseToken(eventChain as ChainLabel, token1)
+          ? "token0"
+          : isBaseToken(eventChain as ChainLabel, token0)
+          ? "token1"
+          : "token0";
+
+        const swapResult = await onV2SwapToWindows({
+          chain: eventChain as ChainLabel,
+          client,
+          addr: pair,
+          token0,
+          token1,
+          target,
+          sender: args.sender,
+          to: args.to,
+          amount0In: args.amount0In,
+          amount1In: args.amount1In,
+          amount0Out: args.amount0Out,
+          amount1Out: args.amount1Out,
+        });
+
+        const otherIsBase =
+          target === "token0"
+            ? isBaseToken(eventChain as ChainLabel, token1)
+            : isBaseToken(eventChain as ChainLabel, token0);
+
+        if (otherIsBase) {
+          let cachedDecimals: [number, number] | null = null;
+          const ensureDecimals = async () => {
+            if (cachedDecimals) return cachedDecimals;
+            cachedDecimals = await Promise.all([
+              getTokenDecimals(client, token0),
+              getTokenDecimals(client, token1),
+            ]);
+            return cachedDecimals;
+          };
+          const [dec0, dec1] = await ensureDecimals();
+          const decimals = { token0: dec0, token1: dec1 };
+
+          if (target === "token0") {
+            if (args.amount0In > 0n && args.amount1Out > 0n) {
+              await recordTaxApprox({
+                chain: eventChain as ChainLabel,
+                type: "v2",
+                addr: pair,
+                client,
+                token0,
+                token1,
+                direction: "sellToken0",
+                tokenIn: args.amount0In,
+                baseOut: args.amount1Out,
+                decimals,
+              });
+            }
+            if (args.amount1In > 0n && args.amount0Out > 0n) {
+              await recordTaxApprox({
+                chain: eventChain as ChainLabel,
+                type: "v2",
+                addr: pair,
+                client,
+                token0,
+                token1,
+                direction: "buyToken0",
+                baseIn: args.amount1In,
+                tokenIn: args.amount0Out,
+                decimals,
+              });
+            }
+          } else {
+            if (args.amount1In > 0n && args.amount0Out > 0n) {
+              await recordTaxApprox({
+                chain: eventChain as ChainLabel,
+                type: "v2",
+                addr: pair,
+                client,
+                token0,
+                token1,
+                direction: "sellToken1",
+                tokenIn: args.amount1In,
+                baseOut: args.amount0Out,
+                decimals,
+              });
+            }
+            if (args.amount0In > 0n && args.amount1Out > 0n) {
+              await recordTaxApprox({
+                chain: eventChain as ChainLabel,
+                type: "v2",
+                addr: pair,
+                client,
+                token0,
+                token1,
+                direction: "buyToken1",
+                baseIn: args.amount0In,
+                tokenIn: args.amount1Out,
+                decimals,
+              });
+            }
+          }
+        }
+
+        const res = await evaluateAlerts({
+          chain: eventChain as ChainLabel,
+          type: "v2",
+          addr: pair,
+          client,
+          token0,
+          token1,
+          target,
+          lastTradeUsd: swapResult?.usd,
+          lastTradeIsBuy: swapResult?.isBuy ?? false,
+          lastTradeBuyerUsd:
+            swapResult && swapResult.isBuy ? swapResult.usd : undefined,
+          liquidityUsd: entry.meta.liquidityUsd,
+          lastMintUsd: entry.meta.lastMintUsd,
+        });
+
+        if (res.level !== "none") {
+          const msg = buildAlertMessage({
+            level: res.level,
+            chain: eventChain as ChainLabel,
+            type: "v2",
+            addr: pair,
+            token0,
+            token1,
+            target,
+            headline: `V2 ${eventChain} ${res.level.toUpperCase()} — ${pair}`,
+            body: res.message,
+          });
+          await tgSend(msg);
+          logger.info({ key, res }, "Alert sent");
+        }
+      },
+    });
+
+    subscriptions.set(subKey, stop);
+  };
+
+  const ensureV3Market = (
+    chain: ChainLabel,
+    poolAddr: `0x${string}`,
+    token0Addr: `0x${string}`,
+    token1Addr: `0x${string}`,
+    fee?: number,
+    meta?: { source?: string }
+  ) => {
+    const pool = normalize(poolAddr);
+    const token0 = normalize(token0Addr);
+    const token1 = normalize(token1Addr);
+    const key = marketKey(chain, "v3", pool);
+
+    if (!watchlist.has(key)) {
+      watchlist.enqueueNew({
+        chain,
+        type: "v3",
+        address: pool,
+        token0,
+        token1,
+        fee,
+      });
+      logger.info(
+        { chain, pool, token0, token1, source: meta?.source ?? "factory" },
+        "Tracking V3 market (pending gates)"
+      );
+      runGates(clients, chain, "v3", pool, token0, token1, fee).catch(() => {});
+    }
+
+    const subKey = `${chain}:v3:${pool}`;
+    if (subscriptions.has(subKey)) return;
+    if (!hasCapacity()) {
+      logger.warn({ chain, pool }, "Active market limit reached, skip V3 subscribe");
+      return;
+    }
+
+    const client = chain === "BSC" ? clients.bsc : clients.ethereum;
+    const stop = watchV3Pool(client, chain, pool, {
+      onV3Swap: async ({ args, chain: eventChain }) => {
+        const entry = watchlist.get(key);
+        if (!entry || entry.status !== "active") return;
+
+        const target = isBaseToken(eventChain as ChainLabel, token1)
+          ? "token0"
+          : isBaseToken(eventChain as ChainLabel, token0)
+          ? "token1"
+          : "token0";
+
+        const swapResult = await onV3SwapToWindows({
+          chain: eventChain as ChainLabel,
+          client,
+          addr: pool,
+          token0,
+          token1,
+          target,
+          sender: args.sender,
+          recipient: args.recipient,
+          amount0: args.amount0,
+          amount1: args.amount1,
+        });
+
+        const res = await evaluateAlerts({
+          chain: eventChain as ChainLabel,
+          type: "v3",
+          addr: pool,
+          client,
+          token0,
+          token1,
+          target,
+          lastTradeUsd: swapResult?.usd,
+          lastTradeIsBuy: swapResult?.isBuy ?? false,
+          lastTradeBuyerUsd:
+            swapResult && swapResult.isBuy ? swapResult.usd : undefined,
+          liquidityUsd: entry.meta.liquidityUsd,
+          lastMintUsd: entry.meta.lastMintUsd,
+        });
+        if (res.level !== "none") {
+          const msg = buildAlertMessage({
+            level: res.level,
+            chain: eventChain as ChainLabel,
+            type: "v3",
+            addr: pool,
+            token0,
+            token1,
+            target,
+            headline: `V3 ${eventChain} ${res.level.toUpperCase()} — ${pool}`,
+            body: res.message,
+          });
+          await tgSend(msg);
+          logger.info({ key, res }, "Alert sent");
+        }
+      },
+    });
+
+    subscriptions.set(subKey, stop);
+  };
 
   // —— 工厂事件：新建 Pair/Pool —— //
   watchFactories(clients, {
-    onNewV2Pair: async ({ chain, pair, token0, token1 }) => {
-      const key = marketKey(chain as ChainLabel, "v2", pair);
-      if (!watchlist.has(key)) {
-        watchlist.enqueueNew({
-          chain: chain as ChainLabel,
-          type: "v2",
-          address: pair,
-          token0,
-          token1,
-        });
-        logger.info(
-          { chain, pair, token0, token1 },
-          "🆕 New V2 Pair (pending gates)"
-        );
-        // 安全闸门（异步跑，不阻塞订阅）
-        runGates(clients, chain as ChainLabel, "v2", pair, token0, token1).catch(
-          () => {}
-        );
-      }
-
-      // 订阅交易事件（只做一次；是否入窗由 active 决定）
-      const subKey = `${chain}:v2:${pair.toLowerCase()}`;
-      if (!subscribed.has(subKey)) {
-        subscribed.add(subKey);
-        const client = chain === "BSC" ? clients.bsc : clients.ethereum;
-
-        watchV2Pair(client, chain as ChainLabel, pair, {
-          onV2Mint: async ({ args: { amount0, amount1 } }) => {
-            // 记录“刚大额加池”信息（用于后续告警加分）
-            const usd = await estimateMintUsdV2({
-              chain: chain as ChainLabel,
-              client,
-              pair,
-              token0,
-              token1,
-              amount0,
-              amount1,
-            });
-            await onV2MintRecord(key, usd);
-          },
-
-          onV2Swap: async ({ args, chain }) => {
-            const entry = watchlist.get(key);
-            if (!entry || entry.status !== "active") return;
-
-            // 目标侧：非基准币的一侧（若两侧都非基准币，默认 token0）
-            const target = isBaseToken(chain as ChainLabel, token1)
-              ? "token0"
-              : isBaseToken(chain as ChainLabel, token0)
-              ? "token1"
-              : "token0";
-
-            // —— 写入滑窗（折 USD）——
-            const swapResult = await onV2SwapToWindows({
-              chain: chain as ChainLabel,
-              client,
-              addr: pair,
-              token0,
-              token1,
-              target,
-              sender: args.sender,
-              to: args.to,
-              amount0In: args.amount0In,
-              amount1In: args.amount1In,
-              amount0Out: args.amount0Out,
-              amount1Out: args.amount1Out,
-            });
-
-            // —— 税率近似样本（仅当“对侧为基准币”时记录）——
-            const otherIsBase =
-              target === "token0"
-                ? isBaseToken(chain as ChainLabel, token1)
-                : isBaseToken(chain as ChainLabel, token0);
-
-            if (otherIsBase) {
-              let cachedDecimals: [number, number] | null = null;
-              const ensureDecimals = async () => {
-                if (cachedDecimals) return cachedDecimals;
-                cachedDecimals = await Promise.all([
-                  getTokenDecimals(client, token0),
-                  getTokenDecimals(client, token1),
-                ]);
-                return cachedDecimals;
-              };
-              const [dec0, dec1] = await ensureDecimals();
-              const decimals = { token0: dec0, token1: dec1 };
-
-              // V2 约定：买入 token0 则 amount0Out>0；卖出 token0 则 amount0In>0（token1 同理）
-              if (target === "token0") {
-                if (args.amount0In > 0n && args.amount1Out > 0n) {
-                  await recordTaxApprox({
-                    chain: chain as ChainLabel,
-                    type: "v2",
-                    addr: pair,
-                    client,
-                    token0,
-                    token1,
-                    direction: "sellToken0",
-                    tokenIn: args.amount0In,
-                    baseOut: args.amount1Out,
-                    decimals,
-                  });
-                }
-                if (args.amount1In > 0n && args.amount0Out > 0n) {
-                  await recordTaxApprox({
-                    chain: chain as ChainLabel,
-                    type: "v2",
-                    addr: pair,
-                    client,
-                    token0,
-                    token1,
-                    direction: "buyToken0",
-                    baseIn: args.amount1In,
-                    tokenIn: args.amount0Out,
-                    decimals,
-                  });
-                }
-              } else {
-                if (args.amount1In > 0n && args.amount0Out > 0n) {
-                  await recordTaxApprox({
-                    chain: chain as ChainLabel,
-                    type: "v2",
-                    addr: pair,
-                    client,
-                    token0,
-                    token1,
-                    direction: "sellToken1",
-                    tokenIn: args.amount1In,
-                    baseOut: args.amount0Out,
-                    decimals,
-                  });
-                }
-                if (args.amount0In > 0n && args.amount1Out > 0n) {
-                  await recordTaxApprox({
-                    chain: chain as ChainLabel,
-                    type: "v2",
-                    addr: pair,
-                    client,
-                    token0,
-                    token1,
-                    direction: "buyToken1",
-                    baseIn: args.amount0In,
-                    tokenIn: args.amount1Out,
-                    decimals,
-                  });
-                }
-              }
-            }
-
-            // —— 告警评估 ——（简单以本笔买入金额判断鲸鱼：>阈值）
-            const res = await evaluateAlerts({
-              chain: chain as ChainLabel,
-              type: "v2",
-              addr: pair,
-              client,
-              token0,
-              token1,
-              target,
-              lastTradeUsd: swapResult?.usd,
-              lastTradeIsBuy: swapResult?.isBuy ?? false,
-              lastTradeBuyerUsd:
-                swapResult && swapResult.isBuy ? swapResult.usd : undefined,
-              liquidityUsd: entry.meta.liquidityUsd,
-              lastMintUsd: entry.meta.lastMintUsd,
-            });
-
-            if (res.level !== "none") {
-              const msg = buildAlertMessage({
-                level: res.level,
-                chain: chain as ChainLabel,
-                type: "v2",
-                addr: pair,
-                token0,
-                token1,
-                target,
-                headline: `V2 ${chain} ${res.level.toUpperCase()} — ${pair}`,
-                body: res.message,
-              });
-              await tgSend(msg);
-              logger.info({ key, res }, "Alert sent");
-            }
-          },
-        });
-      }
-    },
-
-    onNewV3Pool: async ({ chain, pool, token0, token1, fee }) => {
-      const key = marketKey(chain as ChainLabel, "v3", pool);
-      if (!watchlist.has(key)) {
-        watchlist.enqueueNew({
-          chain: chain as ChainLabel,
-          type: "v3",
-          address: pool,
-          token0,
-          token1,
-          fee,
-        });
-        logger.info(
-          { chain, pool, token0, token1 },
-          "🆕 New V3 Pool (pending gates)"
-        );
-        runGates(
-          clients,
-          chain as ChainLabel,
-          "v3",
-          pool,
-          token0,
-          token1,
-          fee
-        ).catch(
-          () => {}
-        );
-      }
-
-      const subKey = `${chain}:v3:${pool.toLowerCase()}`;
-      if (!subscribed.has(subKey)) {
-        subscribed.add(subKey);
-        const client = chain === "BSC" ? clients.bsc : clients.ethereum;
-
-        watchV3Pool(client, chain as ChainLabel, pool, {
-          onV3Swap: async ({ args, chain }) => {
-            const entry = watchlist.get(key);
-            if (!entry || entry.status !== "active") return;
-
-            const target = isBaseToken(chain as ChainLabel, token1)
-              ? "token0"
-              : isBaseToken(chain as ChainLabel, token0)
-              ? "token1"
-              : "token0";
-
-            const swapResult = await onV3SwapToWindows({
-              chain: chain as ChainLabel,
-              client,
-              addr: pool,
-              token0,
-              token1,
-              target,
-              sender: args.sender,
-              recipient: args.recipient,
-              amount0: args.amount0,
-              amount1: args.amount1,
-            });
-
-            // V3 税率样本：略（MVP 简化）
-
-            const res = await evaluateAlerts({
-              chain: chain as ChainLabel,
-              type: "v3",
-              addr: pool,
-              client,
-              token0,
-              token1,
-              target,
-              lastTradeUsd: swapResult?.usd,
-              lastTradeIsBuy: swapResult?.isBuy ?? false,
-              lastTradeBuyerUsd:
-                swapResult && swapResult.isBuy ? swapResult.usd : undefined,
-              liquidityUsd: entry.meta.liquidityUsd,
-              lastMintUsd: entry.meta.lastMintUsd,
-            });
-            if (res.level !== "none") {
-              const msg = buildAlertMessage({
-                level: res.level,
-                chain: chain as ChainLabel,
-                type: "v3",
-                addr: pool,
-                token0,
-                token1,
-                target,
-                headline: `V3 ${chain} ${res.level.toUpperCase()} — ${pool}`,
-                body: res.message,
-              });
-              await tgSend(msg);
-              logger.info({ key, res }, "Alert sent");
-            }
-          },
-        });
-      }
-    },
+    onNewV2Pair: ({ chain, pair, token0, token1 }) =>
+      ensureV2Market(chain as ChainLabel, pair, token0, token1, {
+        source: "factory",
+      }),
+    onNewV3Pool: ({ chain, pool, token0, token1, fee }) =>
+      ensureV3Market(chain as ChainLabel, pool, token0, token1, fee, {
+        source: "factory",
+      }),
   });
 
-  logger.info("👀 Subscriptions ready — factories on BSC & ETH");
+  startTrendingWatcher({
+    onV2Candidate: ({ chain, pair, token0, token1 }) =>
+      ensureV2Market(chain, pair, token0, token1, { source: "trending" }),
+    onV3Candidate: ({ chain, pool, token0, token1, fee }) =>
+      ensureV3Market(chain, pool, token0, token1, fee, { source: "trending" }),
+  });
+
+  logger.info("👀 Subscriptions ready — factories & trending feeds online");
 }
 
 /** 跑安全闸门，通过后激活 watchlist 条目 */

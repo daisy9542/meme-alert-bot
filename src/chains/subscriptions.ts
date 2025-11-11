@@ -224,8 +224,8 @@ export function watchV2Pair(
   chainLabel: "BSC" | "ETH",
   pair: `0x${string}`,
   handlers: PairHandlers
-) {
-  client.watchEvent({
+): () => void {
+  const unwatchSwap = client.watchEvent({
     address: pair,
     event: v2SwapItem,
     onLogs: (logs) => {
@@ -258,7 +258,7 @@ export function watchV2Pair(
     onError: (e) => logger.error({ pair }, "V2 Swap subscribe error"),
   });
 
-  client.watchEvent({
+  const unwatchMint = client.watchEvent({
     address: pair,
     event: v2MintItem,
     onLogs: (logs) => {
@@ -280,6 +280,11 @@ export function watchV2Pair(
     },
     onError: (e) => logger.error({ pair }, "V2 Mint subscribe error"),
   });
+
+  return () => {
+    unwatchSwap?.();
+    unwatchMint?.();
+  };
 }
 
 /** —— Pool 订阅：V3 Swap —— */
@@ -288,8 +293,8 @@ export function watchV3Pool(
   chainLabel: "BSC" | "ETH",
   pool: `0x${string}`,
   handlers: PoolHandlers
-) {
-  client.watchEvent({
+): () => void {
+  const unwatchSwap = client.watchEvent({
     address: pool,
     event: v3SwapItem,
     onLogs: (logs) => {
@@ -333,4 +338,8 @@ export function watchV3Pool(
     },
     onError: (e) => logger.error({ pool }, "V3 Swap subscribe error"),
   });
+
+  return () => {
+    unwatchSwap?.();
+  };
 }

@@ -6,6 +6,7 @@
 - 对通过闸门的池订阅 `Swap/Mint`，做滑动窗口统计
 - 计算三大指标：**1 分钟买入额/笔数**、**量能倍增**、**FDV 增幅**
 - 鲸鱼判定：默认将单笔买入额 ≥ 当前可见 LP 的 **3%** 视为鲸鱼
+- DexScreener 热门池轮询 + WS 槽位限额：优先盯住“热门/高流动性”池，命中后自动进入本地滑窗打分
 - 触发**普通/强烈**预警（默认：控制台输出；可替换为 Telegram/Discord）
 
 > 当前版本语言：TypeScript（ESM），运行器：`tsx`，链库：`viem`。
@@ -74,6 +75,10 @@ VOLUME_MULTIPLIER=5
 FDV_MULTIPLIER=3
 WHALE_SINGLE_BUY_USD=5000
 WHALE_LIQUIDITY_RATIO=0.03
+MAX_ACTIVE_MARKETS=600
+TRENDING_POLL_INTERVAL_MS=60000
+TRENDING_MIN_LIQ_USD=30000
+TRENDING_TOP_K=50
 ```
 
 ### 3) 本地运行（开发模式）
@@ -88,3 +93,10 @@ pnpm run dev
 pnpm run build
 pnpm run start
 ```
+
+## 技术细节
+
+- **双通道发现**：一方面订阅 Pancake/Uniswap 工厂的 `PairCreated/PoolCreated`，另一方面每 60 秒拉取 DexScreener 热门池（过滤基准币配对 + 流动性阈值），把候选地址推入同一套闸门/滑窗流程。
+- **订阅槽位上限**：`MAX_ACTIVE_MARKETS` 控制 WS 订阅预算。若超限，会跳过新的候选，确保节点不会因为暴增的池子被限流。
+- **统一激活逻辑**：无论来自工厂还是热榜，都会先写入 watchlist → runGates（最小流动性、可卖性、LP 风险、税率）→ 只有通过的池才记录交易窗口与指标。
+- **DexScreener 缓存**：token/pair/trending API 统一加 TTL 缓存，提供给最小流动性、LP 风险、热榜等多处调用，避免重复请求导致的 429/超时。
