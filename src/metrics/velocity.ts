@@ -9,8 +9,23 @@ export function getVolumeMultiplier(
   type: "v2" | "v3",
   addr: `0x${string}`
 ) {
-  const one = windows.oneMinute(chain, type, addr).totalUsd;
-  const base = windows.baselineAvgPerMin(chain, type, addr);
-  if (base <= 0) return { ratio: Infinity, one, base };
-  return { ratio: one / base, one, base };
+  const oneMinuteStats = windows.oneMinute(chain, type, addr);
+  const baseline = windows.baselineAvgPerMin(chain, type, addr);
+  const tenMinuteStats = windows.tenMinutesStats(chain, type, addr);
+  const tradeCountBaseline = Math.max(0, tenMinuteStats.buyTxs - oneMinuteStats.buyTxs);
+  const meetsSampleRequirement = tradeCountBaseline >= 3;
+  if (!meetsSampleRequirement || baseline <= 0) {
+    return {
+      ratio: meetsSampleRequirement ? Infinity : undefined,
+      one: oneMinuteStats.totalUsd,
+      base: baseline,
+      sufficientHistory: meetsSampleRequirement,
+    } as const;
+  }
+  return {
+    ratio: oneMinuteStats.totalUsd / baseline,
+    one: oneMinuteStats.totalUsd,
+    base: baseline,
+    sufficientHistory: true,
+  };
 }

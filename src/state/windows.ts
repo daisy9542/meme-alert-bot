@@ -80,6 +80,11 @@ class SlidingWindow {
     return this.aggregateWithin(10 * 60_000, now).totalUsd;
   }
 
+  tenMinutesStats(now = Date.now()) {
+    this.prune(now);
+    return this.aggregateWithin(10 * 60_000, now);
+  }
+
   /**
    * 5–10 分钟“基线均值”（近似做法）：
    *   baseline = (total_10m - total_1m) / 9
@@ -157,9 +162,14 @@ class WindowsManager {
     return res;
   }
 
-  /** 最近 10 分钟总额 */
   tenMinutesTotal(chain: ChainLabel, type: MarketType, addr: `0x${string}`) {
     const res = this.get(chain, type, addr).tenMinutesTotal();
+    this.pruneIdle();
+    return res;
+  }
+
+  tenMinutesStats(chain: ChainLabel, type: MarketType, addr: `0x${string}`) {
+    const res = this.get(chain, type, addr).tenMinutesStats();
     this.pruneIdle();
     return res;
   }

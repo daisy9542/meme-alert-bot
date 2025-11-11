@@ -54,7 +54,9 @@ export async function evaluateAlerts(params: {
   const hitBuy =
     vol.buyUsd >= STRATEGY.BUY_VOL_1M_USD && vol.buyTxs >= STRATEGY.BUY_TXS_1M;
   const hitVel =
-    vel.ratio === Infinity || vel.ratio >= STRATEGY.VOLUME_MULTIPLIER;
+    vel.sufficientHistory &&
+    vel.ratio !== undefined &&
+    (vel.ratio === Infinity || vel.ratio >= STRATEGY.VOLUME_MULTIPLIER);
   const hitFdv = fdvRatio !== undefined && fdvRatio >= STRATEGY.FDV_MULTIPLIER;
   const whaleRatio =
     params.lastTradeIsBuy &&
@@ -98,9 +100,13 @@ export async function evaluateAlerts(params: {
       vol.uniqueBuyers
     } 地址`
   );
-  lines.push(
-    `量能倍数：${vel.ratio === Infinity ? "∞" : vel.ratio.toFixed(2)}×`
-  );
+  if (vel.sufficientHistory && vel.ratio !== undefined) {
+    lines.push(
+      `量能倍数：${vel.ratio === Infinity ? "∞" : vel.ratio.toFixed(2)}×`
+    );
+  } else {
+    lines.push("量能倍数：历史成交不足，未参与判定");
+  }
   if (fdvNow !== undefined && fdvRatio !== undefined) {
     lines.push(
       `FDV：${(fdvNow / 1e6).toFixed(2)}M，总值提升 ${fdvRatio.toFixed(
